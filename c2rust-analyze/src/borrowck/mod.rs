@@ -7,6 +7,7 @@ use crate::labeled_ty::{LabeledTy, LabeledTyCtxt};
 use crate::pointer_id::{PointerTable, PointerTableMut};
 use crate::util::{describe_rvalue, RvalueDesc};
 use indexmap::{IndexMap, IndexSet};
+use log::{debug, info, warn};
 use rustc_hir::def_id::DefId;
 use rustc_middle::mir::{Body, LocalKind, Place, StatementKind, START_BLOCK};
 use rustc_middle::ty::{
@@ -127,9 +128,9 @@ pub fn borrowck_mir<'tcx>(
 ) {
     let mut i = 0;
     loop {
-        eprintln!("run polonius");
+        info!("run polonius");
         let (facts, maps, output) = run_polonius(acx, hypothesis, name, mir, &field_ltys);
-        eprintln!(
+        info!(
             "polonius: iteration {}: {} errors, {} move_errors",
             i,
             output.errors.len(),
@@ -172,7 +173,7 @@ pub fn borrowck_mir<'tcx>(
                     },
                     _ => panic!("loan {:?} was issued by non-assign stmt {:?}?", loan, stmt),
                 };
-                eprintln!("want to drop UNIQUE from pointer {:?}", ptr);
+                debug!("want to drop UNIQUE from pointer {:?}", ptr);
 
                 if hypothesis[ptr].contains(PermissionSet::UNIQUE) {
                     hypothesis[ptr].remove(PermissionSet::UNIQUE);
@@ -181,12 +182,12 @@ pub fn borrowck_mir<'tcx>(
             }
         }
 
-        eprintln!("propagate");
+        info!("propagate");
         changed |= dataflow.propagate(hypothesis, updates_forbidden);
-        eprintln!("done propagating");
+        info!("done propagating");
 
         if !changed {
-            eprintln!(
+            warn!(
                 "{} unresolved borrowck errors in function {:?} (after {} iterations)",
                 output.errors.len(),
                 name,
@@ -256,10 +257,10 @@ fn run_polonius<'tcx>(
 
     // Populate `cfg_edge`
     for (bb, bb_data) in mir.basic_blocks().iter_enumerated() {
-        eprintln!("{:?}:", bb);
+        debug!("{:?}:", bb);
 
         for idx in 0..bb_data.statements.len() {
-            eprintln!("  {}: {:?}", idx, bb_data.statements[idx]);
+            debug!("  {}: {:?}", idx, bb_data.statements[idx]);
             let start = maps.point(bb, idx, SubPoint::Start);
             let mid = maps.point(bb, idx, SubPoint::Mid);
             let next_start = maps.point(bb, idx + 1, SubPoint::Start);
@@ -268,7 +269,7 @@ fn run_polonius<'tcx>(
         }
 
         let term_idx = bb_data.statements.len();
-        eprintln!("  {}: {:?}", term_idx, bb_data.terminator());
+        debug!("  {}: {:?}", term_idx, bb_data.terminator());
         let term_start = maps.point(bb, term_idx, SubPoint::Start);
         let term_mid = maps.point(bb, term_idx, SubPoint::Mid);
         facts.cfg_edge.push((term_start, term_mid));
@@ -361,7 +362,7 @@ fn run_polonius<'tcx>(
 
     dump::dump_facts_to_dir(&facts, &maps, format!("inspect/{}", name)).unwrap();
 
-    eprintln!("running polonius analysis on {name}");
+    info!("running polonius analysis on {name}");
     let facts_hash = bytes_to_hex_string(&hash_facts(&facts));
     let output = match try_load_cached_output(&facts_hash) {
         Some(output) => output,
@@ -387,7 +388,7 @@ fn try_load_cached_output(facts_hash: &str) -> Option<Output> {
     let raw = match bincode::deserialize_from(f) {
         Ok(x) => x,
         Err(e) => {
-            log::warn!("failed to parse polonius cache file {path:?}: {e}");
+            warn!("failed to parse polonius cache file {path:?}: {e}");
             return None;
         }
     };
@@ -419,7 +420,7 @@ fn try_load_cached_output(facts_hash: &str) -> Option<Output> {
         ),
     ) = raw;
 
-    eprintln!("loaded cached facts from {}", path);
+    info!("loaded cached facts from {}", path);
 
     Some(Output {
         errors,
@@ -576,7 +577,7 @@ fn construct_adt_origins<'tcx>(
     ty: &Ty,
     amaps: &mut AtomMaps,
 ) -> &'tcx [(OriginParam, Origin)] {
-    eprintln!("ty: {ty:?}");
+    debug!("ty: {ty:?}");
     let adt_def = ty.ty_adt_def().unwrap();
 
     // create a concrete origin for each actual or hypothetical
@@ -588,7 +589,7 @@ fn construct_adt_origins<'tcx>(
         .map_or(&default, |adt| &adt.lifetime_params)
         .iter()
         .map(|origin| (*origin, amaps.origin()))
-        .inspect(|pairing| eprintln!("pairing lifetime parameter with origin: {pairing:?}"));
+        .inspect(|pairing| log::debug!("pairing lifetime parameter with origin: {pairing:?}"));
     ltcx.arena().alloc_from_iter(origins)
 }
 

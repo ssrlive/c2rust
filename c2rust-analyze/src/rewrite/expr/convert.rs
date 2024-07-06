@@ -108,7 +108,7 @@ impl<'tcx> ConvertVisitor<'tcx> {
         if let Some(child_span_rw) = self.rewrites.get(&sub_ex.hir_id) {
             let child_rw = &child_span_rw.1;
             if let Some(subst_rw) = child_rw.try_subst(&rw_sub) {
-                eprintln!(
+                debug!(
                     "get_subexpr: substituted {rw_sub:?} into {child_rw:?}, producing {subst_rw:?}"
                 );
                 self.subsumed_child_rewrites
@@ -299,7 +299,7 @@ impl<'tcx> Visitor<'tcx> for ConvertVisitor<'tcx> {
                 let adj_rws =
                     take_prefix_while(&mut mir_rws, |x| x.desc == MirOriginDesc::Adjustment(i));
                 for mir_rw in adj_rws {
-                    eprintln!("would apply {mir_rw:?} for adjustment #{i}, over {hir_rw:?}");
+                    debug!("would apply {mir_rw:?} for adjustment #{i}, over {hir_rw:?}");
                     hir_rw = rewrite_from_mir_rws(&mir_rw.rw, hir_rw);
                 }
                 hir_rw
@@ -316,7 +316,7 @@ impl<'tcx> Visitor<'tcx> for ConvertVisitor<'tcx> {
         }
 
         if !matches!(hir_rw, Rewrite::Identity) {
-            eprintln!(
+            debug!(
                 "rewrite {:?} at {:?} (materialize? {})",
                 hir_rw, callsite_span, self.materialize_adjustments
             );
@@ -423,7 +423,7 @@ fn generate_zeroize_code(zero_ty: &ZeroizeType, lv: &str) -> String {
             generate_zeroize_code(elem_zero_ty, "(*elem)")
         ),
         ZeroizeType::Struct(ref fields) => {
-            eprintln!("zeroize: {} fields on {lv}: {fields:?}", fields.len());
+            debug!("zeroize: {} fields on {lv}: {fields:?}", fields.len());
             let mut s = String::new();
             write!(s, "{{\n").unwrap();
             for (name, field_zero_ty) in fields {

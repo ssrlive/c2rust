@@ -237,7 +237,7 @@ impl<'a, 'tcx> UnlowerVisitor<'a, 'tcx> {
                     Some(x @ (pl, _)) if is_var(pl) => x,
                     _ => {
                         warn("expected final Assign to store into var");
-                        eprintln!(
+                        debug!(
                             "visit_expr_inner: bail out: expr at {:?} isn't assigned to a var",
                             ex.span
                         );
@@ -713,7 +713,7 @@ fn is_temp_var(mir: &Body, pl: mir::PlaceRef) -> bool {
 }
 
 fn build_span_index(mir: &Body<'_>) -> SpanIndex<Location> {
-    eprintln!("building span index for {:?}:", mir.source);
+    debug!("building span index for {:?}:", mir.source);
     let mut span_index_items = Vec::new();
     for (bb, bb_data) in mir.basic_blocks().iter_enumerated() {
         for (i, stmt) in bb_data.statements.iter().enumerate() {
@@ -721,7 +721,7 @@ fn build_span_index(mir: &Body<'_>) -> SpanIndex<Location> {
                 block: bb,
                 statement_index: i,
             };
-            eprintln!("  {:?}: {:?}", loc, stmt.source_info.span);
+            debug!("  {:?}: {:?}", loc, stmt.source_info.span);
             span_index_items.push((stmt.source_info.span, loc));
         }
 
@@ -729,7 +729,7 @@ fn build_span_index(mir: &Body<'_>) -> SpanIndex<Location> {
             block: bb,
             statement_index: bb_data.statements.len(),
         };
-        eprintln!("  {:?}: {:?}", loc, bb_data.terminator().source_info.span);
+        debug!("  {:?}: {:?}", loc, bb_data.terminator().source_info.span);
         span_index_items.push((bb_data.terminator().source_info.span, loc));
     }
 
@@ -841,23 +841,23 @@ fn debug_print_unlower_map<'tcx>(
     mir: &Body<'tcx>,
     unlower_map: &BTreeMap<PreciseLoc, MirOrigin>,
 ) {
-    eprintln!("unlowering for {:?}:", mir.source);
+    debug!("unlowering for {:?}:", mir.source);
     for (bb_id, bb) in mir.basic_blocks().iter_enumerated() {
-        eprintln!("  block {bb_id:?}:");
+        debug!("  block {bb_id:?}:");
         for (i, stmt) in bb.statements.iter().enumerate() {
             let loc = Location {
                 block: bb_id,
                 statement_index: i,
             };
 
-            eprintln!("    {loc:?}: {stmt:?}");
+            debug!("    {loc:?}: {stmt:?}");
             for (k, v) in unlower_map.range(&PreciseLoc { loc, sub: vec![] }..) {
                 if k.loc != loc {
                     break;
                 }
                 let sublocs = &k.sub;
                 let ex = tcx.hir().expect_expr(v.hir_id);
-                eprintln!("      {sublocs:?}: {:?}, {:?}", v.desc, ex.span);
+                debug!("      {sublocs:?}: {:?}, {:?}", v.desc, ex.span);
             }
         }
 
@@ -868,14 +868,14 @@ fn debug_print_unlower_map<'tcx>(
                 statement_index: bb.statements.len(),
             };
 
-            eprintln!("    {loc:?}: {term:?}");
+            debug!("    {loc:?}: {term:?}");
             for (k, v) in unlower_map.range(&PreciseLoc { loc, sub: vec![] }..) {
                 if k.loc != loc {
                     break;
                 }
                 let sublocs = &k.sub;
                 let ex = tcx.hir().expect_expr(v.hir_id);
-                eprintln!("      {sublocs:?}: {:?}, {:?}", v.desc, ex.span);
+                debug!("      {sublocs:?}: {:?}, {:?}", v.desc, ex.span);
             }
         }
     }

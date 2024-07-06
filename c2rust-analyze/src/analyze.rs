@@ -24,8 +24,8 @@ use crate::type_desc::Ownership;
 use crate::util;
 use crate::util::Callee;
 use crate::util::TestAttr;
-use ::log::warn;
 use c2rust_pdg::graph::Graphs;
+use log::{debug, info, warn};
 use rustc_hir::def::DefKind;
 use rustc_hir::def_id::CrateNum;
 use rustc_hir::def_id::DefId;
@@ -241,7 +241,7 @@ fn update_pointer_info<'tcx>(acx: &mut AnalysisCtxt<'_, 'tcx>, mir: &Body<'tcx>)
                 _ => continue,
             };
 
-            eprintln!(
+            debug!(
                 "update_pointer_info: visit assignment: {:?}[{}]: {:?}",
                 bb, i, stmt
             );
@@ -249,7 +249,7 @@ fn update_pointer_info<'tcx>(acx: &mut AnalysisCtxt<'_, 'tcx>, mir: &Body<'tcx>)
             if !pl.is_indirect() {
                 // This is a write directly to `pl.local`.
                 *write_count.entry(pl.local).or_insert(0) += 1;
-                eprintln!("  record write to LHS {:?}", pl);
+                debug!("  record write to LHS {:?}", pl);
             }
 
             let ref_pl = match *rv {
@@ -261,7 +261,7 @@ fn update_pointer_info<'tcx>(acx: &mut AnalysisCtxt<'_, 'tcx>, mir: &Body<'tcx>)
                 // For simplicity, we consider taking the address of a local to be a write.  We
                 // expect this not to happen for the sorts of temporary refs we're looking for.
                 if !ref_pl.is_indirect() {
-                    eprintln!("  record write to ref target {:?}", ref_pl);
+                    debug!("  record write to ref target {:?}", ref_pl);
                     *write_count.entry(ref_pl.local).or_insert(0) += 1;
                 }
 
@@ -377,7 +377,7 @@ fn mark_foreign_fixed<'tcx>(
             let fields = adt_def.all_fields();
             for field in fields {
                 let field_lty = gacx.field_ltys[&field.did];
-                eprintln!(
+                debug!(
                     "adding FIXED permission for {adt_did:?} field {:?}",
                     field.did
                 );
@@ -565,9 +565,9 @@ struct FuncInfo<'tcx> {
 }
 
 fn run(tcx: TyCtxt) {
-    eprintln!("all defs:");
+    debug!("all defs:");
     for ldid in tcx.hir_crate_items(()).definitions() {
-        eprintln!("{:?}", ldid);
+        debug!("{:?}", ldid);
     }
 
     // Load the list of fixed defs early, so any errors are reported immediately.
@@ -583,9 +583,9 @@ fn run(tcx: TyCtxt) {
     // Follow a postorder traversal, so that callers are visited after their callees.  This means
     // callee signatures will usually be up to date when we visit the call site.
     let all_fn_ldids = fn_body_owners_postorder(tcx);
-    eprintln!("callgraph traversal order:");
+    debug!("callgraph traversal order:");
     for &ldid in &all_fn_ldids {
-        eprintln!("  {:?}", ldid);
+        debug!("  {:?}", ldid);
     }
 
     populate_field_users(&mut gacx, &all_fn_ldids);
@@ -616,9 +616,9 @@ fn run(tcx: TyCtxt) {
 
     // Collect all `static` items.
     let all_static_dids = all_static_items(tcx);
-    eprintln!("statics:");
+    debug!("statics:");
     for &did in &all_static_dids {
-        eprintln!("  {:?}", did);
+        debug!("  {:?}", did);
     }
 
     // Assign global `PointerId`s for types of `static` items.
@@ -813,7 +813,7 @@ fn run(tcx: TyCtxt) {
     // Remap pointers based on equivalence classes, so all members of an equivalence class now use
     // the same `PointerId`.
     let (global_counter, global_equiv_map) = global_equiv.renumber();
-    eprintln!("global_equiv_map = {global_equiv_map:?}");
+    debug!("global_equiv_map = {global_equiv_map:?}");
     pointee_type::remap_pointers_global(
         &mut global_pointee_types,
         &global_equiv_map,
@@ -828,7 +828,7 @@ fn run(tcx: TyCtxt) {
 
         let info = func_info.get_mut(&ldid).unwrap();
         let (local_counter, local_equiv_map) = info.local_equiv.renumber(&global_equiv_map);
-        eprintln!("local_equiv_map = {local_equiv_map:?}");
+        debug!("local_equiv_map = {local_equiv_map:?}");
         pointee_type::remap_pointers_local(
             &mut global_pointee_types,
             &mut info.local_pointee_types,
@@ -917,7 +917,7 @@ fn run(tcx: TyCtxt) {
     let mut func_def_path_hash_to_ldid = HashMap::new();
     for &ldid in &all_fn_ldids {
         let def_path_hash: (u64, u64) = tcx.def_path_hash(ldid.to_def_id()).0.as_value();
-        eprintln!("def_path_hash {:?} = {:?}", def_path_hash, ldid);
+        debug!("def_path_hash {:?} = {:?}", def_path_hash, ldid);
         func_def_path_hash_to_ldid.insert(def_path_hash, ldid);
     }
 
@@ -961,7 +961,7 @@ fn run(tcx: TyCtxt) {
                 let ptr = match acx.ptr_of(dest) {
                     Some(x) => x,
                     None => {
-                        eprintln!(
+                        warn!(
                             "pdg: {}: local {:?} appears as dest, but has no PointerId",
                             n.function.name, dest
                         );
@@ -973,7 +973,7 @@ fn run(tcx: TyCtxt) {
                 let node_info = match n.info.as_ref() {
                     Some(x) => x,
                     None => {
-                        eprintln!(
+                        warn!(
                             "pdg: {}: node with dest {:?} is missing NodeInfo",
                             n.function.name, dest
                         );
@@ -1005,7 +1005,7 @@ fn run(tcx: TyCtxt) {
                     let added = perms & !old_perms;
                     let removed = old_perms & !perms;
                     let kept = old_perms & perms;
-                    eprintln!(
+                    debug!(
                         "pdg: changed {:?}: added {:?}, removed {:?}, kept {:?}",
                         ptr, added, removed, kept
                     );
@@ -1097,8 +1097,8 @@ fn run(tcx: TyCtxt) {
         &mut g_updates_forbidden,
     );
 
-    eprintln!("=== ADT Metadata ===");
-    eprintln!("{:?}", gacx.adt_metadata);
+    debug!("=== ADT Metadata ===");
+    debug!("{:?}", gacx.adt_metadata);
 
     let mut loop_count = 0;
     loop {
@@ -1164,14 +1164,14 @@ fn run(tcx: TyCtxt) {
                 let added = new & !old;
                 let removed = old & !new;
                 let kept = old & new;
-                eprintln!(
+                debug!(
                     "changed {:?}: added {:?}, removed {:?}, kept {:?}",
                     ptr, added, removed, kept
                 );
                 num_changed += 1;
             }
         }
-        eprintln!(
+        debug!(
             "iteration {}: {} global pointers changed",
             loop_count, num_changed
         );
@@ -1180,7 +1180,7 @@ fn run(tcx: TyCtxt) {
             break;
         }
     }
-    eprintln!("reached fixpoint in {} iterations", loop_count);
+    info!("reached fixpoint in {} iterations", loop_count);
 
     // Do final processing on each function.
     for &ldid in &all_fn_ldids {
@@ -1353,7 +1353,7 @@ fn run2<'tcx>(
         assert!(i < 100);
         func_reports.clear();
         all_rewrites.clear();
-        eprintln!("\n--- start rewriting ---");
+        info!("--- start rewriting ---");
 
         // Update non-rewritten items first.  This has two purposes.  First, it clears the
         // `new_keys()` lists, which we check at the end of the loop to see whether we've reached a
@@ -1485,7 +1485,7 @@ fn run2<'tcx>(
     let mut adt_reports = HashMap::<DefId, String>::new();
     for &def_id in gacx.adt_metadata.table.keys() {
         if gacx.foreign_mentioned_tys.contains(&def_id) {
-            eprintln!("Avoiding rewrite for foreign-mentioned type: {def_id:?}");
+            debug!("Avoiding rewrite for foreign-mentioned type: {def_id:?}");
             continue;
         }
         if fixed_defs.contains(&def_id) {
@@ -1537,7 +1537,7 @@ fn run2<'tcx>(
 
         // Print labeling and rewrites for the current function.
 
-        eprintln!("\nfinal labeling for {:?}:", name);
+        debug!("final labeling for {:?}:", name);
         let lcx1 = crate::labeled_ty::LabeledTyCtxt::new(tcx);
         let lcx2 = crate::labeled_ty::LabeledTyCtxt::new(tcx);
         for (local, decl) in mir.local_decls.iter_enumerated() {
@@ -1552,12 +1552,11 @@ fn run2<'tcx>(
             );
         }
 
-        eprintln!("\ntype assignment for {:?}:", name);
+        debug!("type assignment for {:?}:", name);
         rewrite::dump_rewritten_local_tys(&acx, &asn, pointee_types, &mir, describe_local);
 
-        eprintln!();
         if let Some(report) = func_reports.remove(&ldid) {
-            eprintln!("{}", report);
+            debug!("{}", report);
         }
 
         info.acx_data.set(acx.into_data());
@@ -1610,7 +1609,7 @@ fn run2<'tcx>(
     }
 
     // Print results for `static` items.
-    eprintln!("\nfinal labeling for static items:");
+    debug!("final labeling for static items:");
     let lcx1 = crate::labeled_ty::LabeledTyCtxt::new(tcx);
     let lcx2 = crate::labeled_ty::LabeledTyCtxt::new(tcx);
     let mut static_dids = gacx.static_tys.keys().cloned().collect::<Vec<_>>();
@@ -1628,10 +1627,10 @@ fn run2<'tcx>(
             &gasn.flags,
         );
     }
-    eprintln!("\n{statics_report}");
+    debug!("{statics_report}");
 
     // Print results for ADTs and fields
-    eprintln!("\nfinal labeling for fields:");
+    debug!("final labeling for fields:");
     let mut field_dids = gacx.field_ltys.keys().cloned().collect::<Vec<_>>();
     field_dids.sort();
     for did in field_dids {
@@ -1641,7 +1640,7 @@ fn run2<'tcx>(
         if pid != PointerId::NONE {
             let ty_perms = gasn.perms[pid];
             let ty_flags = gasn.flags[pid];
-            eprintln!("{name:}: ({pid}) perms = {ty_perms:?}, flags = {ty_flags:?}");
+            debug!("{name:}: ({pid}) perms = {ty_perms:?}, flags = {ty_flags:?}");
         }
 
         // Emit annotations for fields
@@ -1676,7 +1675,7 @@ fn run2<'tcx>(
     adt_dids.sort();
     for did in adt_dids {
         if let Some(report) = adt_reports.remove(&did) {
-            eprintln!("\n{}", report);
+            debug!("{}", report);
         }
     }
 
@@ -1715,17 +1714,17 @@ fn run2<'tcx>(
     // ----------------------------------
 
     // Report errors that were caught previously
-    eprintln!("\nerror details:");
+    debug!("error details:");
     for ldid in tcx.hir().body_owners() {
         if let Some(detail) = gacx.fns_failed.get(&ldid.to_def_id()) {
             if !detail.has_backtrace() {
                 continue;
             }
-            eprintln!("\nerror in {:?}:\n{}", ldid, detail.to_string_full());
+            debug!("error in {:?}:{}", ldid, detail.to_string_full());
         }
     }
 
-    eprintln!("\nerror summary:");
+    debug!("error summary:");
     fn sorted_def_ids(it: impl IntoIterator<Item = DefId>) -> Vec<DefId> {
         let mut v = it.into_iter().collect::<Vec<_>>();
         v.sort();
@@ -1739,27 +1738,27 @@ fn run2<'tcx>(
             Some(detail) => detail.to_string_short(),
             None => "(no panic)".into(),
         };
-        eprintln!("analysis of {def_id:?} failed: {flags:?}, {detail_str}");
+        debug!("analysis of {def_id:?} failed: {flags:?}, {detail_str}");
     }
 
     for def_id in sorted_def_ids(gacx.dont_rewrite_statics.keys()) {
         let flags = gacx.dont_rewrite_statics.get(def_id);
-        eprintln!("analysis of {def_id:?} failed: {flags:?}");
+        debug!("analysis of {def_id:?} failed: {flags:?}");
     }
 
     for def_id in sorted_def_ids(gacx.dont_rewrite_fields.keys()) {
         let flags = gacx.dont_rewrite_fields.get(def_id);
-        eprintln!("analysis of {def_id:?} failed: {flags:?}");
+        debug!("analysis of {def_id:?} failed: {flags:?}");
     }
 
-    eprintln!(
-        "\nsaw errors in {} / {} functions",
+    info!(
+        "saw errors in {} / {} functions",
         gacx.fns_failed.len(),
         all_fn_ldids.len()
     );
 
     if known_perm_error_fns.len() > 0 {
-        eprintln!(
+        info!(
             "saw permission errors in {} known fns",
             known_perm_error_fns.len()
         );
@@ -1935,7 +1934,7 @@ fn print_labeling_for_var<'tcx>(
             perms[lty.label]
         }
     });
-    eprintln!("{}: addr_of = {:?}, type = {:?}", desc, addr_of1, ty1);
+    debug!("{}: addr_of = {:?}, type = {:?}", desc, addr_of1, ty1);
 
     let addr_of2 = flags[addr_of_ptr];
     let ty2 = lcx2.relabel(lty, &mut |lty| {
@@ -1945,14 +1944,14 @@ fn print_labeling_for_var<'tcx>(
             flags[lty.label]
         }
     });
-    eprintln!(
+    debug!(
         "{}: addr_of flags = {:?}, type flags = {:?}",
         desc, addr_of2, ty2
     );
 
     let addr_of3 = addr_of_ptr;
     let ty3 = lty;
-    eprintln!("{}: addr_of = {:?}, type = {:?}", desc, addr_of3, ty3);
+    debug!("{}: addr_of = {:?}, type = {:?}", desc, addr_of3, ty3);
 }
 
 fn print_function_pointee_types<'tcx>(
@@ -1961,9 +1960,9 @@ fn print_function_pointee_types<'tcx>(
     mir: &Body<'tcx>,
     pointee_types: PointerTable<PointeeTypes<'tcx>>,
 ) {
-    eprintln!("\npointee types for {}", name);
+    debug!("pointee types for {}", name);
     for (local, decl) in mir.local_decls.iter_enumerated() {
-        eprintln!(
+        debug!(
             "{:?} ({}): addr_of = {:?}, type = {:?}",
             local,
             describe_local(acx.tcx(), decl),
@@ -1986,7 +1985,7 @@ fn print_function_pointee_types<'tcx>(
             if tys.ltys.len() == 0 && !tys.incomplete {
                 continue;
             }
-            eprintln!(
+            debug!(
                 "  pointer {:?}: {:?}{}",
                 ptr,
                 tys.ltys,
