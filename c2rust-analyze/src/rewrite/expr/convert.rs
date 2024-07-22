@@ -352,6 +352,7 @@ impl<'tcx> ConvertVisitor<'tcx> {
                 elem_size,
                 src_single,
                 dest_single,
+                option,
             } => {
                 // `realloc(p, n)` -> `Box::new(...)`
                 assert!(matches!(hir_rw, Rewrite::Identity));
@@ -371,9 +372,14 @@ impl<'tcx> ConvertVisitor<'tcx> {
                 }
                 let expr = match (src_single, dest_single) {
                     (false, false) => {
+                        let src = if option {
+                            "src_ptr.unwrap_or(Box::new([]))"
+                        } else {
+                            "src_ptr"
+                        };
                         stmts.push(Rewrite::Let1(
                             "mut dest_ptr".into(),
-                            Box::new(Rewrite::Text("Vec::from(src_ptr)".into())),
+                            Box::new(format_rewrite!("Vec::from({src})")),
                         ));
                         stmts.push(format_rewrite!(
                             "dest_ptr.resize_with(dest_n, || {})",
@@ -382,7 +388,8 @@ impl<'tcx> ConvertVisitor<'tcx> {
                         Rewrite::Text("dest_ptr.into_boxed_slice()".into())
                     },
                     (false, true) => {
-                        format_rewrite!("src_ptr.into_iter().next().unwrap_or_else(|| {})",
+                        let opt_flatten = if option { ".flatten()" } else { "" };
+                        format_rewrite!("src_ptr.into_iter(){opt_flatten}.next().unwrap_or_else(|| {})",
                             zeroize_expr)
                     },
                     (true, false) => {
@@ -390,9 +397,15 @@ impl<'tcx> ConvertVisitor<'tcx> {
                             "mut dest_ptr".into(),
                             Box::new(Rewrite::Text("Vec::with_capacity(dest_n)".into())),
                         ));
-                        stmts.push(Rewrite::Text(
-                            "if dest_n >= 1 { dest_ptr.push(*src_ptr); }".into(),
-                        ));
+                        if option {
+                            stmts.push(Rewrite::Text(
+                                "if dest_n >= 1 { if let Some(src) = src_ptr { dest_ptr.push(*src); } }".into(),
+                            ));
+                        } else {
+                            stmts.push(Rewrite::Text(
+                                "if dest_n >= 1 { dest_ptr.push(*src_ptr); }".into(),
+                            ));
+                        }
                         stmts.push(format_rewrite!(
                             "dest_ptr.resize_with(dest_n, || {})",
                             zeroize_expr,
@@ -400,7 +413,12 @@ impl<'tcx> ConvertVisitor<'tcx> {
                         Rewrite::Text("dest_ptr.into_boxed_slice()".into())
                     },
                     (true, true) => {
-                        Rewrite::Text("src_ptr".into())
+                        if option {
+                            format_rewrite!("src_ptr.unwrap_or_else(|| Box::new({}))",
+                                zeroize_expr)
+                        } else {
+                            Rewrite::Text("src_ptr".into())
+                        }
                     },
                 };
                 Rewrite::Block(stmts, Some(Box::new(expr)))
@@ -686,6 +704,7 @@ fn generate_zeroize_code(zero_ty: &ZeroizeType, lv: &str) -> String {
     match *zero_ty {
         ZeroizeType::Int => format!("{lv} = 0"),
         ZeroizeType::Bool => format!("{lv} = false"),
+        ZeroizeType::Option => format!("{lv} = None"),
         ZeroizeType::Array(ref elem_zero_ty) => format!(
             "
             {{
@@ -719,6 +738,7 @@ fn generate_zeroize_expr(zero_ty: &ZeroizeType) -> String {
     match *zero_ty {
         ZeroizeType::Int => format!("0"),
         ZeroizeType::Bool => format!("false"),
+        ZeroizeType::Option => format!("None"),
         ZeroizeType::Array(ref elem_zero_ty) =>
             format!("std::array::from_fn(|| {})", generate_zeroize_expr(elem_zero_ty)),
         ZeroizeType::Struct(ref name, ref fields) => {
@@ -767,6 +787,15 @@ pub fn convert_cast_rewrite(kind: &mir_op::RewriteKind, hir_rw: Rewrite) -> Rewr
             };
             let place = Rewrite::Deref(Box::new(hir_rw));
             Rewrite::Ref(Box::new(place), mutbl_from_bool(mutbl))
+        }
+
+        mir_op::RewriteKind::Ref { mutbl } => {
+            // `p` -> `&p` / `&mut p`
+            Rewrite::Ref(Box::new(hir_rw), mutbl_from_bool(mutbl))
+        }
+        mir_op::RewriteKind::Deref => {
+            // `p` -> `*p`
+            Rewrite::Deref(Box::new(hir_rw))
         }
 
         mir_op::RewriteKind::OptionUnwrap => {
