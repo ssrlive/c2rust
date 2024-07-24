@@ -1147,8 +1147,8 @@ fn run(tcx: TyCtxt) {
             &mut func_info,
             &mut gasn,
             pdg_file_path,
-            |_asn, ldid, ptr, g, _node_info| {
-                let parent = if ptr.is_global() { None } else { Some(ldid) };
+            |_asn, ldid, ptr, ptr_is_global, g, _node_info| {
+                let parent = if ptr_is_global { None } else { Some(ldid) };
                 let obs = observations.entry((parent, ptr)).or_insert((false, false));
                 let node_info_is_null = g.is_null;
                 if node_info_is_null {
@@ -1201,7 +1201,8 @@ fn run(tcx: TyCtxt) {
                 let mut has_dynamic_observations = false;
                 for ptr in ptrs {
                     let static_non_null: bool = asn.perms()[ptr].contains(PermissionSet::NON_NULL);
-                    let parent = if ptr.is_global() { None } else { Some(ldid) };
+                    let ptr_is_global = ptr.index() < acx.local_ptr_base();
+                    let parent = if ptr_is_global { None } else { Some(ldid) };
                     let dynamic_non_null: Option<bool> = observations.get(&(parent, ptr))
                         .map(|&(saw_null, saw_non_null)| saw_non_null && !saw_null);
                     if dynamic_non_null.is_some() {
@@ -2184,7 +2185,7 @@ fn pdg_update_permissions<'tcx>(
         func_info,
         gasn,
         pdg_file_path,
-        |asn, _ldid, ptr, g, node_info| {
+        |asn, _ldid, ptr, _ptr_is_global, g, node_info| {
             let old_perms = asn.perms()[ptr];
             let mut perms = old_perms;
             if node_info.flows_to.load.is_some() {
@@ -2233,7 +2234,7 @@ fn pdg_update_permissions_with_callback<'tcx>(
     func_info: &mut HashMap<LocalDefId, FuncInfo<'tcx>>,
     gasn: &mut GlobalAssignment,
     pdg_file_path: impl AsRef<Path>,
-    mut callback: impl FnMut(&mut Assignment, LocalDefId, PointerId, &Graph, &NodeInfo),
+    mut callback: impl FnMut(&mut Assignment, LocalDefId, PointerId, bool, &Graph, &NodeInfo),
 ) {
     let tcx = gacx.tcx;
 
@@ -2305,7 +2306,8 @@ fn pdg_update_permissions_with_callback<'tcx>(
                 }
             };
 
-            callback(&mut asn, ldid, ptr, g, node_info);
+            let ptr_is_global = ptr.index() < acx.local_ptr_base();
+            callback(&mut asn, ldid, ptr, ptr_is_global, g, node_info);
 
             info.acx_data.set(acx.into_data());
         }
