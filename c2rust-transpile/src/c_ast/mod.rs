@@ -4,10 +4,10 @@ use std::cell::RefCell;
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use std::fmt::{self, Debug, Display};
-use std::mem;
 use std::ops::Index;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
+use std::{iter, mem};
 
 pub use c2rust_ast_exporter::clang_ast::{BuiltinVaListKind, SrcFile, SrcLoc, SrcSpan};
 
@@ -206,16 +206,64 @@ impl TypedAstContext {
         self.files[id].path.as_deref()
     }
 
+    fn compare_src_locs_old(&self, a: &SrcLoc, b: &SrcLoc) -> Ordering {
+        /// Compare `self` with `other`, without regard to file id
+        fn cmp_pos(a: &SrcLoc, b: &SrcLoc) -> Ordering {
+            (a.line, a.column).cmp(&(b.line, b.column))
+        }
+        let path_a = self.include_map[self.file_map[a.fileid as usize]].clone();
+        let path_b = self.include_map[self.file_map[b.fileid as usize]].clone();
+        for (include_a, include_b) in path_a.iter().zip(path_b.iter()) {
+            if include_a.fileid != include_b.fileid {
+                return cmp_pos(include_a, include_b);
+            }
+        }
+        use Ordering::*;
+        match path_a.len().cmp(&path_b.len()) {
+            Less => {
+                // compare the place b was included in a'a file with a
+                let b = path_b.get(path_a.len()).unwrap();
+                cmp_pos(a, b)
+            }
+            Equal => cmp_pos(a, b),
+            Greater => {
+                // compare the place a was included in b's file with b
+                let a = path_a.get(path_b.len()).unwrap();
+                cmp_pos(a, b)
+            }
+        }
+    }
+
     /// Compare two [`SrcLoc`]s based on their import path
     pub fn compare_src_locs(&self, a: &SrcLoc, b: &SrcLoc) -> Ordering {
         use Ordering::*;
         let path_a = &self.include_map[self.file_map[a.fileid as usize]];
         let path_b = &self.include_map[self.file_map[b.fileid as usize]];
 
+        /// Compare `self` with `other`, without regard to file id.
+        fn cmp_pos(a: &SrcLoc, b: &SrcLoc) -> Ordering {
+            (a.line, a.column).cmp(&(b.line, b.column))
+        }
+
+        let mut early_return = None;
+        for (include_a, include_b) in path_a.iter().zip(path_b.iter()) {
+            if include_a.fileid != include_b.fileid {
+                early_return = Some(cmp_pos(include_a, include_b));
+                break;
+            }
+        }
+
         // Find the first include that does not match between the two
         let common_len = path_a.len().min(path_b.len());
+        // for (a, b) in iter::zip(&path_a[..common_len], &path_b[..common_len]) {
+        //     if a.fileid != b.fileid {
+        //         assert_eq!(Some(cmp_pos(a, b)), early_return);
+        //         return cmp_pos(a, b);
+        //     }
+        // }
         let order = path_a[..common_len].cmp(&path_b[..common_len]);
         if order != Equal {
+            // assert_eq!(Some(order), early_return);
             return order;
         }
 
@@ -236,7 +284,13 @@ impl TypedAstContext {
                 (a, b)
             }
         };
-        a.cmp(b)
+        // let ord = cmp_pos(a, b);
+        let ord = a.cmp(b);
+
+        let old_ord = self.compare_src_locs_old(a, b);
+        // assert_eq!(ord, old_ord, "{a}, {b}");
+        ord
+        // a.cmp(b)
     }
 
     pub fn get_file_include_line_number(&self, file: FileId) -> Option<u64> {
@@ -676,10 +730,34 @@ impl TypedAstContext {
     pub fn sort_top_decls(&mut self) {
         // Group and sort declarations by file and by position
         let mut decls_top = mem::take(&mut self.c_decls_top);
+
+        let render_decls_top = |decls_top: &[CDeclId]| {
+            decls_top
+                .iter()
+                .map(|decl| self.display_loc(&self.index(*decl).loc))
+                .map(|x| {
+                    let x = match x {
+                        Some(x) => x,
+                        None => return "".into(),
+                    };
+                    let x = format!("{x}");
+                    let x = match x
+                        .strip_prefix("/home/kkysen/work/rust/c2rust-testsuite/tests/curl/repo/")
+                    {
+                        Some(x) => format!("./{x}"),
+                        _ => x,
+                    };
+                    x
+                })
+                .collect::<Vec<_>>()
+        };
+
         decls_top.sort_unstable_by(|a, b| {
             let a = self.index(*a);
             let b = self.index(*b);
             use Ordering::*;
+            // dbg!(self.display_loc(&a.loc));
+            // dbg!(self.display_loc(&b.loc));
             match (&a.loc, &b.loc) {
                 (None, None) => Equal,
                 (None, _) => Less,
@@ -687,6 +765,7 @@ impl TypedAstContext {
                 (Some(a), Some(b)) => self.compare_src_locs(&a.begin(), &b.begin()),
             }
         });
+        dbg!(render_decls_top(&decls_top));
         self.c_decls_top = decls_top;
     }
 
